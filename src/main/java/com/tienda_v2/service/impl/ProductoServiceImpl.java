@@ -28,16 +28,19 @@ public class ProductoServiceImpl implements ProductoService{
     
     //Se obtiene una Producto segun el Id pasado por parametro
     @Transactional(readOnly=true)
+    @Override
     public Producto getProducto(Producto producto) {
         return productoDao.findById(producto.getIdProducto()).orElse(null);  
     }
             
     //Se actualiza una producto o se inserta una nueva... (Si no hay id es un insert)
+    @Override
     public void save(Producto producto) {
         productoDao.save(producto);
     }
     
     //Se elimina una producto segun el id pasado
+    @Override
     public void delete(Producto producto) {
         productoDao.delete(producto);
     }
