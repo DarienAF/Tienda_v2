@@ -16,7 +16,7 @@ public class Producto implements Serializable{
     @Column (name="id_producto")
  
     private Long idProducto;
-    private Long idCategoria;
+    
     private String descripcion;
     private String detalle;
     private double precio;
@@ -32,5 +32,7 @@ public class Producto implements Serializable{
         this.activo = activo;
     }
     
-    
+    @ManyToOne
+    @JoinColumn(name="id_categoria")
+    private Categoria categoria;
 }
