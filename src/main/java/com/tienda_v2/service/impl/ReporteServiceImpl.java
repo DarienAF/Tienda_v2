@@ -1,15 +1,14 @@
 package com.tienda_v2.service.impl;
 
 import com.tienda_v2.service.ReporteService;
-import jakarta.activation.DataSource;
-import jakarta.mail.Quota.Resource;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.sql.SQLException;
 import java.util.Map;
-import java.util.logging.Logger;
+import javax.sql.DataSource;
 import net.sf.jasperreports.engine.JRException;
 import net.sf.jasperreports.engine.JasperExportManager;
 import net.sf.jasperreports.engine.JasperFillManager;
@@ -21,6 +20,8 @@ import net.sf.jasperreports.export.SimpleWriterExporterOutput;
 import net.sf.jasperreports.export.SimpleXlsxReportConfiguration;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.InputStreamResource;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -33,113 +34,98 @@ public class ReporteServiceImpl implements ReporteService {
     private DataSource dataSource;
 
     @Override
-    public ResponseEntity<Resource> generaReporte(
-            String report,
-            Map<String, Object> parametros,
-            String tipo) throws IOException {
-        //Se asigna el tipo de la pagina a generar
-        String estilo = tipo.equalsIgnoreCase("vPdf")
-                ? "inline;" : "attachment;";
+    public ResponseEntity<Resource> generaReporte(String reporte, Map<String, Object> parametros, String tipo) throws IOException {
 
-        //Se establece la ruta de los reportes
-        String reportePath = "reportes";
+        try {
+            String estilo
+                    = tipo.equalsIgnoreCase("vPdf")
+                    ? "online; " : "attachment";
 
-        //Se define la salida temporal del reporte generado
-        ByteArrayOutputStream salida = new ByteArrayOutputStream();
-        String reporte = null;
+            //La ruta dentro de "default package"
+            String reportePath = "reportes";
+            //En salida quedarà el reporte ya generado...
+            ByteArrayOutputStream salida = new ByteArrayOutputStream();
 
-        //Se establece la fuente para leer el report .jasper
-        ClassPathResource fuente = new ClassPathResource(
-                reportePath
-                + File.separator
-                + reporte
-                + ".jasper");
+            //Se define el lugar y acceso al archivo .jasper
+            ClassPathResource fuente
+                    = new ClassPathResource(
+                            reportePath
+                            + File.separator
+                            + reporte
+                            + ".jasper");
 
-        //Se define el objeto que leer el archivo de reporte .jasper
-        InputStream elReporte = fuente.getInputStream();
+            //Un objeto para leer efectivamente el reporte
+            InputStream elReporte = fuente.getInputStream();
 
-        //Se genera el reporte en memoria
-        var reporteJasper = JasperFillManager
-                .fillReport(
-                        elReporte,
-                        parametros,
-                        dataSource.getConnection());
-
-        //A partir de aca inicia la respuesta al usuario
-        MediaType mediaType = null;
-
-        //Se debe decidir cual tipo de reporte se genera
-        switch (tipo) {
-            case "Pdf", "vPdf" -> { //Se descargara un Excel
-                JasperExportManager
-                        .exportReportToPdfStream(
-                                reporteJasper,
-                                salida);
-                mediaType = MediaType.APPLICATION_PDF;
-                String archivoSalida = reporte + ".pdf";
+            //Se crea el reporte como tal
+            var reporteJasper
+                    = JasperFillManager
+                            .fillReport(
+                                    elReporte,
+                                    parametros,
+                                    dataSource.getConnection());
+            MediaType mediaType = null;
+            String archivoSalida = "";
+            byte[] data;
+            if (null != tipo) {
+                switch (tipo) {
+                    case "Pdf", "vPdf" -> {
+                        JasperExportManager.exportReportToPdfStream(reporteJasper, salida);
+                        mediaType = MediaType.APPLICATION_PDF;
+                        archivoSalida = reporte + ".pdf";
+                    }
+                    case "Xls" -> {
+                        JRXlsxExporter exportador = new JRXlsxExporter();
+                        exportador.setExporterInput(
+                                new SimpleExporterInput(
+                                        reporteJasper));
+                        exportador.setExporterOutput(
+                                new SimpleOutputStreamExporterOutput(
+                                        salida));
+                        SimpleXlsxReportConfiguration configuracion
+                                = new SimpleXlsxReportConfiguration();
+                        configuracion.setDetectCellType(true);
+                        configuracion.setCollapseRowSpan(true);
+                        exportador.setConfiguration(configuracion);
+                        exportador.exportReport();
+                        mediaType = MediaType.APPLICATION_OCTET_STREAM;
+                        archivoSalida = reporte + ".xlsx";
+                    }
+                    case "Csv" -> {
+                        JRCsvExporter exportador = new JRCsvExporter();
+                        exportador.setExporterInput(
+                                new SimpleExporterInput(
+                                        reporteJasper));
+                        exportador.setExporterOutput(
+                                new SimpleWriterExporterOutput(
+                                        salida));
+                        exportador.exportReport();
+                        mediaType = MediaType.TEXT_PLAIN;
+                        archivoSalida = reporte + ".csv";
+                    }
+                    default -> {
+                    }
+                }
             }
-            case "Xls" -> { //Se descargara un Pdf
-                JRXlsxExporter paraExcel = new JRXlsxExporter();
 
-                paraExcel.setExporterInput(
-                        new SimpleExporterInput(
-                                reporteJasper));
+            data = salida.toByteArray();
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Content-Disposition",
+                    estilo + "filename=\"" + archivoSalida + "\"");
 
-                paraExcel.setExporterOutput(
-                        new SimpleOutputStreamExporterOutput(
-                                salida));
+            return ResponseEntity
+                    .ok()
+                    .headers(headers)
+                    .contentLength(data.length)
+                    .contentType(mediaType)
+                    .body(
+                            new InputStreamResource(
+                                    new ByteArrayInputStream(data)));
 
-                SimpleXlsxReportConfiguration configuracion
-                        = new SimpleXlsxReportConfiguration();
-
-                configuracion.setDetectCellType(true);
-                configuracion.setCollapseRowSpan(true);
-
-                paraExcel.setConfiguration(configuration);
-                paraExcel.exportReport();
-
-                mediaType = MediaType.APPLICATION_OCTET_STREAM;
-                String archivoSalida = reporte + ".xlsx";
-
-            }
-            case "Csv" -> { //Se descargara un Excel
-                JRCsvExporter paraCvs = new JRCsvExporter();
-
-                paraCvs.setExporterInput(
-                        new SimpleExporterInput(
-                                reporteJasper));
-
-                paraCvs.setExporterOutput(
-                        new SimpleWriterExporterOutput(
-                                salida));
-
-                paraCvs.exportReport();
-
-                mediaType = MediaType.TEXT_PLAIN;
-                String archivoSalida = reporte + ".cvs";
-            }
+        } catch (SQLException | JRException e) {
+            e.printStackTrace();
+            return null;
         }
 
-        HttpHeaders headers = new HttpHeaders();
-        String archivoSalida = null;
-        headers.set("Content-Disposition",
-                estilo + "filename=\"" + archivoSalida + "\"");
-        return ResponseEntity
-                .ok()
-                .headers(headers)
-                .contentLenght(data.length)
-                .contentType(mediaType)
-                .body(
-                        new InputStreamResource(
-                                new ByteArrayInputStream(data)));
-
     }
-    catch (JRException | SQLException ex
-
-    
-        ) {
-        ex.printStackTrace();
-    }
-
-return null;
 }
